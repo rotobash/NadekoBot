@@ -19,6 +19,7 @@ using NadekoBot.Modules.Games;
 using System.Collections.Concurrent;
 using System.Threading;
 using NadekoBot.DataStructures;
+using System.Text.RegularExpressions;
 
 namespace NadekoBot.Services
 {
@@ -166,15 +167,13 @@ namespace NadekoBot.Services
 
         private async Task<bool> WordFiltered(IGuild guild, SocketUserMessage usrMsg)
         {
-            var filteredChannelWords = Permissions.FilterCommands.FilteredWordsForChannel(usrMsg.Channel.Id, guild.Id) ?? new ConcurrentHashSet<string>();
-            var filteredServerWords = Permissions.FilterCommands.FilteredWordsForServer(guild.Id) ?? new ConcurrentHashSet<string>();
-            var wordsInMessage = usrMsg.Content.ToLowerInvariant().Split(' ');
+            var filteredChannelWords = Permissions.FilterCommands.FilteredWordsForChannel(usrMsg.Channel.Id, guild.Id) ?? new ConcurrentHashSet<Regex>();
+            var filteredServerWords = Permissions.FilterCommands.FilteredWordsForServer(guild.Id) ?? new ConcurrentHashSet<Regex>();
+            var word = usrMsg.Content;
             if (filteredChannelWords.Count != 0 || filteredServerWords.Count != 0)
             {
-                foreach (var word in wordsInMessage)
-                {
-                    if (filteredChannelWords.Contains(word) ||
-                        filteredServerWords.Contains(word))
+                    if (filteredChannelWords.IsMatch(word) ||
+                        filteredServerWords.IsMatch(word))
                     {
                         try
                         {
@@ -186,7 +185,6 @@ namespace NadekoBot.Services
                         }
                         return true;
                     }
-                }
             }
             return false;
         }

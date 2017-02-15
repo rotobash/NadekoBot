@@ -7,6 +7,7 @@ using NadekoBot.Services;
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Text.RegularExpressions;
 
 namespace NadekoBot.Modules.Permissions
 {
@@ -19,22 +20,22 @@ namespace NadekoBot.Modules.Permissions
             public static ConcurrentHashSet<ulong> InviteFilteringServers { get; }
 
             //serverid, filteredwords
-            private static ConcurrentDictionary<ulong, ConcurrentHashSet<string>> ServerFilteredWords { get; }
+            private static ConcurrentDictionary<ulong, ConcurrentHashSet<Regex>> ServerFilteredWords { get; }
 
             public static ConcurrentHashSet<ulong> WordFilteringChannels { get; }
             public static ConcurrentHashSet<ulong> WordFilteringServers { get; }
 
-            public static ConcurrentHashSet<string> FilteredWordsForChannel(ulong channelId, ulong guildId)
+            public static ConcurrentHashSet<Regex> FilteredWordsForChannel(ulong channelId, ulong guildId)
             {
-                ConcurrentHashSet<string> words = new ConcurrentHashSet<string>();
+                ConcurrentHashSet<Regex> words = new ConcurrentHashSet<Regex>();
                 if(WordFilteringChannels.Contains(channelId))
                     ServerFilteredWords.TryGetValue(guildId, out words);
                 return words;
             }
 
-            public static ConcurrentHashSet<string> FilteredWordsForServer(ulong guildId)
+            public static ConcurrentHashSet<Regex> FilteredWordsForServer(ulong guildId)
             {
-                var words = new ConcurrentHashSet<string>();
+                var words = new ConcurrentHashSet<Regex>();
                 if(WordFilteringServers.Contains(guildId))
                     ServerFilteredWords.TryGetValue(guildId, out words);
                 return words;
@@ -42,19 +43,23 @@ namespace NadekoBot.Modules.Permissions
 
             static FilterCommands()
             {
-                var guildConfigs = NadekoBot.AllGuildConfigs;
+                using (var uow = DbHandler.UnitOfWork())
+                {
+                    var guildConfigs = NadekoBot.AllGuildConfigs;
 
-                InviteFilteringServers = new ConcurrentHashSet<ulong>(guildConfigs.Where(gc => gc.FilterInvites).Select(gc => gc.GuildId));
-                InviteFilteringChannels = new ConcurrentHashSet<ulong>(guildConfigs.SelectMany(gc => gc.FilterInvitesChannelIds.Select(fci => fci.ChannelId)));
+                    InviteFilteringServers = new ConcurrentHashSet<ulong>(guildConfigs.Where(gc => gc.FilterInvites).Select(gc => gc.GuildId));
+                    InviteFilteringChannels = new ConcurrentHashSet<ulong>(guildConfigs.SelectMany(gc => gc.FilterInvitesChannelIds.Select(fci => fci.ChannelId)));
 
-                var dict = guildConfigs.ToDictionary(gc => gc.GuildId, gc => new ConcurrentHashSet<string>(gc.FilteredWords.Select(fw => fw.Word)));
+                    var dict = guildConfigs.ToDictionary(gc => gc.GuildId, gc => new ConcurrentHashSet<Regex>(gc.FilteredWords.Select(fw => new Regex(fw.Word, RegexOptions.Compiled & RegexOptions.IgnoreCase))));
 
-                ServerFilteredWords = new ConcurrentDictionary<ulong, ConcurrentHashSet<string>>(dict);
+                    ServerFilteredWords = new ConcurrentDictionary<ulong, ConcurrentHashSet<Regex>>(dict);
 
-                var serverFiltering = guildConfigs.Where(gc => gc.FilterWords);
-                WordFilteringServers = new ConcurrentHashSet<ulong>(serverFiltering.Select(gc => gc.GuildId));
+                    var serverFiltering = guildConfigs.Where(gc => gc.FilterWords);
+                    WordFilteringServers = new ConcurrentHashSet<ulong>(serverFiltering.Select(gc => gc.GuildId));
 
-                WordFilteringChannels = new ConcurrentHashSet<ulong>(guildConfigs.SelectMany(gc => gc.FilterWordsChannelIds.Select(fwci => fwci.ChannelId)));
+                    WordFilteringChannels = new ConcurrentHashSet<ulong>(guildConfigs.SelectMany(gc => gc.FilterWordsChannelIds.Select(fwci => fwci.ChannelId)));
+
+                }
             }
 
             [NadekoCommand, Usage, Description, Aliases]
@@ -180,8 +185,7 @@ namespace NadekoBot.Modules.Permissions
             public async Task FilterWord([Remainder] string word)
             {
                 var channel = (ITextChannel)Context.Channel;
-
-                word = word?.Trim().ToLowerInvariant();
+                
 
                 if (string.IsNullOrWhiteSpace(word))
                     return;
@@ -199,17 +203,17 @@ namespace NadekoBot.Modules.Permissions
                     await uow.CompleteAsync().ConfigureAwait(false);
                 }
 
-                var filteredWords = ServerFilteredWords.GetOrAdd(channel.Guild.Id, new ConcurrentHashSet<string>());
+                var filteredWords = ServerFilteredWords.GetOrAdd(channel.Guild.Id, new ConcurrentHashSet<Regex>());
 
                 if (removed == 0)
                 {
-                    filteredWords.Add(word);
+                    filteredWords.Add(new Regex(word, RegexOptions.Compiled & RegexOptions.IgnoreCase));
                     await channel.SendConfirmAsync($"Word `{word}` successfully added to the list of filtered words.")
                             .ConfigureAwait(false);
                 }
                 else
                 {
-                    filteredWords.TryRemove(word);
+                    filteredWords.TryRemove(new Regex(word, RegexOptions.Compiled & RegexOptions.IgnoreCase));
                     await channel.SendConfirmAsync($"Word `{word}` removed from the list of filtered words.")
                             .ConfigureAwait(false);
                 }
@@ -221,7 +225,7 @@ namespace NadekoBot.Modules.Permissions
             {
                 var channel = (ITextChannel)Context.Channel;
 
-                ConcurrentHashSet<string> filteredWords;
+                ConcurrentHashSet<Regex> filteredWords;
                 ServerFilteredWords.TryGetValue(channel.Guild.Id, out filteredWords);
 
                 await channel.SendConfirmAsync($"List of filtered words", string.Join("\n", filteredWords))

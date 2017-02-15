@@ -178,6 +178,17 @@ namespace NadekoBot.Extensions
             }
         }
 
+        //Check if a word matches any regex contained in list
+        public static bool IsMatch(this IEnumerable<Regex> regexs, string str)
+        {
+            foreach (var expr in regexs)
+            {
+                if (expr.IsMatch(str))
+                    return true;
+            }
+            return false;
+        }
+
         public static bool IsInteger(this decimal number) => number == Math.Truncate(number);
 
         public static string SanitizeMentions(this string str) =>
